@@ -102,8 +102,20 @@ getMask width (MaskParams dilValue blurVal) dia =
     -- :: JP.Image PixelRGB8 -> RGB
     jpGrey = JP.extractLumaPlane jpData
 
+    -- Make the region outside circle opaque/white
+    jpGreyCicular = JP.generateImage genFun width width
+      where
+        genFun x y = if (inCircle x y)
+          then JP.pixelAt jpGrey x y
+          else 255
+        inCircle x y = if (x'*x' + y'*y' > radius*radius) then False else True
+          where
+            x' = radius - x
+            y' = radius - y
+            radius = floor $ (fromIntegral width)/2
+
     greyImg :: Grey
-    greyImg = toFridayGrey jpGrey
+    greyImg = toFridayGrey jpGreyCicular
 
     blurredImg :: Grey
     blurredImg = blur blurVal greyImg
