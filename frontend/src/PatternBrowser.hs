@@ -41,17 +41,19 @@ patternBrowseWidget fullHost patListDyn = do
     f (groupName, files) = do
       divClass "row panel panel-primary" $ do
         divClass "panel-heading" $ text groupName
-        eVs <- forM files
-          (\file ->
-             divClass "col-md-1" $ do
-               text file
-               e <- imgJump (Just "#edit-fgt-widget")
-                 $ getImgUrl groupName file
-               return $
-                 (CreateForeGroundTemplate (groupName, file))
-                  <$ domEvent Click e
-          )
-        return (leftmost eVs)
+        doPagination 12 (constDyn files) (\files -> do
+          eVs <- divClass "row" $ forM files
+            (\file ->
+               divClass "col-md-1" $ do
+                 text file
+                 e <- imgJump (Just "#edit-fgt-widget")
+                   $ getImgUrl groupName file
+                 return $
+                   (CreateForeGroundTemplate (groupName, file))
+                    <$ domEvent Click e
+            )
+          return (leftmost eVs))
+
 
     widget patList = do
       eVs <- (mapM f patList)
