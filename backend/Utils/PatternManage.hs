@@ -1,3 +1,4 @@
+{-# LANGUAGE LambdaCase #-}
 module Utils.PatternManage where
 
 import Import
@@ -144,3 +145,16 @@ getZipFile files = do
               else Nothing
 
   -- create zip and store zip in static
+
+backgroundDir = "static/background/"
+getBackgroundImage :: IO (Maybe (Diagram Rasterific))
+getBackgroundImage = do
+  let path = "./" ++ T.unpack backgroundDir
+  files <- listDirectory $ path
+  let pngFiles = filter (\f -> takeExtension f == ".png") files
+      fName [] = Nothing
+      fName (f:_) = Just $ path <> f
+  e <- mapM loadImageEmb (fName pngFiles)
+  return $ join $ forM e $ \case
+    Left _ -> Nothing
+    Right dimg -> Just $ image dimg

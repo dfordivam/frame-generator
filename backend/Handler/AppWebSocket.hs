@@ -68,7 +68,8 @@ appWebSocketServer appSt = do
         (Just (CreateForeGroundTemplate pat)) -> do
           key <- mylift $ runDB $ do
             let layers = NE.fromList [(pat, def :: ForeGroundParams)]
-            insert (ForeGroundTemplateDB $ enc layers)
+                fgtD  = ForeGroundData layers def
+            insert (ForeGroundTemplateDB $ enc fgtD)
           return $ Just $ NewForeGroundTemplateT $
             NewForeGroundTemplate (fromSqlKey key)
 
@@ -77,7 +78,7 @@ appWebSocketServer appSt = do
             get (toSqlKey fgtId)
           let msg = ForeGroundTemplateDataT
                 <$> ForeGroundTemplateDataRes fgtId
-                      <$> (ForeGroundData <$> d)
+                      <$> d
               d = join $ decodeStrict <$>
                 foreGroundTemplateDBData <$> fgt
           return $ msg
@@ -111,8 +112,9 @@ appWebSocketServer appSt = do
           fgt <- mylift $ runDB $ get $ toSqlKey fgtId
 
           let
-            l = (NE.map snd) <$> pl
-            pl :: Maybe (NonEmpty (PatternName, ForeGroundParams))
+            l = (NE.map snd) <$> (getLayersData <$> pl)
+            getLayersData (ForeGroundData l _ ) = l
+            pl :: Maybe ForeGroundData
             pl = join $ decodeStrict <$>
               foreGroundTemplateDBData <$> fgt
 
@@ -126,7 +128,7 @@ appWebSocketServer appSt = do
               dias <- liftIO $ getPatternsDiaScaled pats
 
               let resDia = getForeGround <$> dias <*> l
-                  resImg = encodeToPng <$> resDia <*> pure 600
+                  resImg = BSL.toStrict <$> (encodePng <$> (render <$> resDia <*> pure 600))
               fname <- liftIO $ forM resImg (savePng Nothing)
               return $ (\f -> (fgtId,pats,f)) <$> fname
 
@@ -135,17 +137,14 @@ appWebSocketServer appSt = do
                       (catMaybes (NE.toList lst)))
           return $ Just msg
 
-        (Just (SaveForeGround (ForeGroundData fgtData))) -> do
-          let pats = NE.map fst fgtData
-              l = NE.map snd fgtData
-
+        (Just (SaveForeGround fgtD)) -> do
           rnd <- liftIO $ randomRIO (0,maxBound::Int64)
-          fNames <- liftIO $ makeFGAndSave rnd pats l
+          fNames <- liftIO $ makeFGAndSave rnd fgtD
 
           let
               fname = fst <$> fNames
               maskName = snd <$> fNames
-              d = enc (ForeGroundData fgtData)
+              d = enc fgtD
           let fg = ForeGroundDB d <$> fname <*> maskName
           mylift $ runDB $ mapM insert fg
 
@@ -155,13 +154,14 @@ appWebSocketServer appSt = do
           fgt <- mylift $ runDB $ get $ toSqlKey fgtId
 
           let
-              l = (NE.map snd) <$> pl
-              pl :: Maybe (NonEmpty (PatternName, ForeGroundParams))
-              pl = join $ decodeStrict <$>
-                    foreGroundTemplateDBData <$> fgt
-
-              d = enc <$> (ForeGroundData <$> (NE.zip pats <$> l))
-          fNames <- liftIO $ mapM (makeFGAndSave fgtId pats) l
+              l = (NE.map snd) <$> ((\(ForeGroundData l _) -> l) <$> fgtDorig)
+              fgtDorig :: Maybe ForeGroundData
+              fgtDorig = join $ decodeStrict <$>
+                foreGroundTemplateDBData <$> fgt
+              fgtD = ForeGroundData <$> (NE.zip pats <$> l)
+                <*> ((\(ForeGroundData _ m) -> m) <$> fgtDorig)
+              d = enc <$> fgtD
+          fNames <- liftIO $ mapM (makeFGAndSave fgtId) fgtD
 
           let fg = ForeGroundDB <$> d <*> fname <*> maskName
               fname = fst <$> join fNames
@@ -231,25 +231,23 @@ getAllPermutations l1 l2 l3 =
 
 makeFGAndSave ::
      FgtId
-  -> NonEmpty (Text,Text)
-  -> NonEmpty ForeGroundParams
+  -> ForeGroundData
   -> IO (Maybe (Text,Text))
-makeFGAndSave fgtId pats l = do
+makeFGAndSave fgtId (ForeGroundData layerData maskParams) = do
+  let pats = NE.map fst layerData
+      l = NE.map snd layerData
   dias <- getPatternsDiaScaled pats
-
   let resDia = getForeGround <$> dias <*> pure l
-      resImg = BSL.toStrict <$> (encodeToPngWithAA <$> resDia <*> pure 600)
-      m = getMask 600 def
-        <$> resDia
+      resImg = BSL.toStrict <$> (encodePng <$> renderedDia)
+      renderedDia = renderWithAA <$> resDia <*> pure 600
+      m =
+        BSL.toStrict <$>
+        (encodePng <$> (getMask 600 maskParams <$> renderedDia))
       grps = map fst pats
       name = concat $ intersperse "_" $ NE.cons (tshow fgtId) fnames
-      fnames = (map ((T.dropEnd 4).snd) pats) -- remove .png
+      fnames = (map ((T.dropEnd 4) . snd) pats) -- remove .png
       dir = (T.concat $ NE.toList $ NE.intersperse "_" grps) <> "/"
-
       dirSave = foregroundDir <> dir
-
-  fname <- forM resImg (savePng (Just (dirSave,name)))
-
-  maskName <- forM m (savePng (Just (dirSave,name <> "_mask")))
-
+  fname <- forM resImg (savePng (Just (dirSave, name)))
+  maskName <- forM m (savePng (Just (dirSave, name <> "_mask")))
   return $ (,) <$> fname <*> maskName

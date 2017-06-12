@@ -148,6 +148,7 @@ data EditFGTemplate
   | DeleteLayer LayerId
   | EditMask MaskParams
   | ToggleZoom
+  | TogglePreview
   | SaveFG
   | SaveMask
   deriving (Generic, Show)

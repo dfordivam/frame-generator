@@ -22,6 +22,7 @@ type LayerId = Int
 data PatternShape = Horizontal | Vertical | Diagnol
 data ForeGroundData = ForeGroundData
   (NonEmpty (PatternName, ForeGroundParams))
+  MaskParams
   deriving (Generic, Show)
 
 data ForeGroundParams = ForeGroundParams {
@@ -43,7 +44,7 @@ data MaskParams = MaskParams {
   deriving (Generic, Show, Eq)
 
 instance Default MaskParams where
-  def = MaskParams 4 4
+  def = MaskParams 2 2
 
 -- Values
 fgtemplatesDir :: Text

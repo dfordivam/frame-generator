@@ -5,7 +5,15 @@
 {-# LANGUAGE AllowAmbiguousTypes       #-}
 
 -- Algo for doing image creation/manipulation
-module Utils.FrameCreator where
+module Utils.FrameCreator
+  (getForeGround
+  , getQuarterForeGround
+  , getMask
+  , createFrame
+  , render
+  , renderWithAA
+  , encodePng)
+  where
 
 import Common
 
@@ -36,27 +44,63 @@ import Control.Monad.ST.Safe
 import Data.List.NonEmpty (NonEmpty)
 import qualified Data.List.NonEmpty as NE
 
-encodeToPng :: Diagram Rasterific -> Int -> ByteString
-encodeToPng dia width = BSL.toStrict $
-  encodePng $ render dia width
+-- Create Diagram
+--------------------------------------------------------------------------------------
+getForeGround = getForeGround' False
+getQuarterForeGround = getForeGround' True
 
-encodeToPngLazy :: Diagram Rasterific -> Int -> BSL.ByteString
-encodeToPngLazy dia width =
-  encodePng $ render dia width
+getForeGround' ::
+     Bool
+  -> NonEmpty (Diagram Rasterific)
+  -> NonEmpty ForeGroundParams
+  -> Diagram Rasterific
+getForeGround'
+  quarterImage imgs layers
+  = mconcat $ NE.toList $ NE.zipWith (getForeGroundLayer quarterImage) imgs layers
 
-encodeToPngWithAA :: Diagram Rasterific -> Int -> BSL.ByteString
-encodeToPngWithAA dia width =
-  encodePng $ resized
+getForeGroundLayer ::
+     Bool
+  -> Diagram Rasterific
+  -> ForeGroundParams
+  -> Diagram Rasterific
+getForeGroundLayer quarterImage img
+  (ForeGroundParams num rotOffset scaling radiusOffset angleOffset)
+  = mconcat $ map snd finalList
   where
-    img = render dia (width*2)
-    resized :: JP.Image JP.PixelRGBA8
-    resized = toJuicyRGBA $ (f (toFridayRGBA img))
+    tmplt = Horizontal
+    initRot =
+      case tmplt of
+        Horizontal -> 0
+        Vertical -> -90
+        Diagnol -> -45
 
-    f inpImg = resize Bilinear (ix2 width width) inpImg
-      -- where
-      --   cropped :: RGBA
-      --   cropped = crop (Rect 0 0 (width*2) (width*2)) inpImg
+    radius = getDefaultRadius num tmplt img
+    finalList = if quarterImage
+                   then take (floor ((fromIntegral num) /4)) transList
+                   else transList
 
+    scaledImg = scale scaling img
+
+    imgL1 :: [(Int, Diagram B)]
+    imgL1 = zip (0:[1..]) $ take num (repeat scaledImg)
+
+    rotatedList :: [(Int, Diagram B)]
+    rotatedList = map (\(n,i) ->
+      (n,rotateBy ((angleOffset + (fromIntegral n))/(fromIntegral num)) i)) imgL1
+
+    rotOffsetApplied :: [(Int, Diagram B)]
+    rotOffsetApplied = map (\(n,i) ->
+      (n,rotate ((initRot + rotOffset) @@ deg) i)) rotatedList
+
+    radiusAfterOffset = radius * (radiusOffset/100)
+    -- Apply transformations
+    transList =
+      map (\(n,i) -> (n, translateX (x n) (translateY (y n) i))) rotOffsetApplied
+        where
+          x n = g sin n
+          y n = g cos n
+          g f n = radiusAfterOffset*f
+            ((((-2)*(angleOffset + (fromIntegral n))) /(fromIntegral num))*pi)
 
 -- Depend on the template
 getDefaultRadius :: Int -> PatternShape -> Diagram B -> Double
@@ -75,19 +119,17 @@ getDefaultRadius num' t img =
     alpha = (2*pi)/num
     root2 = sqrt (2.0)
 
+--------------------------------------------------------------------------------------
+
 getMask ::
      Int
   -> MaskParams
-  -> Diagram Rasterific
-  -> ByteString
-getMask width (MaskParams dilValue blurVal) dia =
-  enc blurredFinalMask
-
+  -> JP.Image JP.PixelRGBA8
+  -> JP.Image JP.Pixel8
+getMask width (MaskParams dilValue blurVal) diaJPData = blurredFinalMask
   where
-    enc i = BSL.toStrict $ encodePng i
-
     jpData :: JP.Image JP.PixelRGB8
-    jpData = JP.pixelMap invertTransparent (render dia width)
+    jpData = JP.pixelMap invertTransparent diaJPData
 
     -- An alpha value of zero represents full transparency,
     -- and a value of (2^bitdepth)-1 represents a
@@ -146,6 +188,44 @@ getMask width (MaskParams dilValue blurVal) dia =
     w :: Double
     w = fromIntegral width
 
+
+createFrame ::
+     Diagram Rasterific
+  -> JP.Image JP.PixelRGBA8
+  -> MaskParams
+  -> Int
+  -> JP.Image JP.PixelRGBA8
+createFrame backImg fgJP maskParams width = maskedImgJpData
+  where
+    -- Create the raster of all three of same size
+    -- Make the mask portion invisible for image
+    -- Add the frame on top of this
+
+    imgJP = renderSquareImage backImg width
+
+    msk = getMask width maskParams fgJP
+
+    maskJP = JP.pixelMap modMask $ msk
+
+    modMask :: JP.Pixel8 -> JP.PixelRGBA8
+    -- Black portion, outside
+    modMask 0 = JP.PixelRGBA8 0 0 0 0
+    -- White portion, inside
+    modMask a = JP.PixelRGBA8 255 255 255 a
+
+    maskedImgJpData =
+      JP.zipPixelComponent3 doMasking
+        imgJP fgJP maskJP
+
+    doMasking i f m =
+      if m > 0
+        -- Blur orig Image at the border
+        then ceiling $
+          ((fromIntegral i)* (fromIntegral m))/255
+        else f
+
+-- Render Utilities
+--------------------------------------------------------------------------------------
 render ::
      Diagram Rasterific
   -> Int
@@ -156,6 +236,18 @@ render dia width = renderDia Rasterific
   where
     w :: Double
     w = fromIntegral width
+
+renderWithAA ::
+     Diagram Rasterific
+  -> Int
+  -> JP.Image JP.PixelRGBA8
+renderWithAA dia width = resized
+  where
+    img = render dia (width*2)
+    resized :: JP.Image JP.PixelRGBA8
+    resized = toJuicyRGBA $ (f (toFridayRGBA img))
+
+    f inpImg = resize Bilinear (ix2 width width) inpImg
 
 
 renderSquareImage :: Diagram Rasterific -> Int -> JP.Image JP.PixelRGBA8
@@ -180,99 +272,3 @@ renderSquareImage diaImg width = squareImage
 
     xoff = if wi > hi then (ceiling ((fromIntegral (wi - edge))/2.0)) else 0
     yoff = if wi < hi then (ceiling ((fromIntegral (hi - edge))/2.0)) else 0
-
--- createFrame ::
---      BackgroundImage
---   -> ForeGround
---   -> Mask
---   -> Int
---   -> ByteString
-
--- createFrame img fg mask width =
---   BSL.toStrict $ encodePng maskedImgJpData
---   where
---     -- Create the raster of all three of same size
---     -- Make the mask portion invisible for image
---     -- Add the frame on top of this
-
---     imgJP = renderSquareImage (origBackgroundImage img) width
---     fgJP = render (foreGroundDia fg) width
-
-
---     (_,_,_,msk) = getMask (foreGroundDia fg)
---             width (maskParams mask)
-
---     maskJP = JP.pixelMap modMask $ msk
-
---     modMask :: JP.Pixel8 -> JP.PixelRGBA8
---     -- Black portion, outside
---     modMask 0 = JP.PixelRGBA8 0 0 0 0
---     -- White portion, inside
---     modMask a = JP.PixelRGBA8 255 255 255 a
-
---     maskedImgJpData =
---       JP.zipPixelComponent3 doMasking
---         imgJP fgJP maskJP
-
---     doMasking i f m =
---       if m > 0
---         -- Blur orig Image at the border
---         then ceiling $
---           ((fromIntegral i)* (fromIntegral m))/255
---         else f
-
-getForeGround = getForeGround' False
-getQuarterForeGround = getForeGround' True
-
-getForeGround' ::
-     Bool
-  -> NonEmpty (Diagram Rasterific)
-  -> NonEmpty ForeGroundParams
-  -> Diagram Rasterific
-getForeGround'
-  quarterImage imgs layers
-  = mconcat $ NE.toList $ NE.zipWith (getForeGroundLayer quarterImage) imgs layers
-
-getForeGroundLayer ::
-     Bool
-  -> Diagram Rasterific
-  -> ForeGroundParams
-  -> Diagram Rasterific
-getForeGroundLayer quarterImage img
-  (ForeGroundParams num rotOffset scaling radiusOffset angleOffset)
-  = mconcat $ map snd finalList
-  where
-    tmplt = Horizontal
-    initRot =
-      case tmplt of
-        Horizontal -> 0
-        Vertical -> -90
-        Diagnol -> -45
-
-    radius = getDefaultRadius num tmplt img
-    finalList = if quarterImage
-                   then take (floor ((fromIntegral num) /4)) transList
-                   else transList
-
-    scaledImg = scale scaling img
-
-    imgL1 :: [(Int, Diagram B)]
-    imgL1 = zip (0:[1..]) $ take num (repeat scaledImg)
-
-    rotatedList :: [(Int, Diagram B)]
-    rotatedList = map (\(n,i) ->
-      (n,rotateBy ((angleOffset + (fromIntegral n))/(fromIntegral num)) i)) imgL1
-
-    rotOffsetApplied :: [(Int, Diagram B)]
-    rotOffsetApplied = map (\(n,i) ->
-      (n,rotate ((initRot + rotOffset) @@ deg) i)) rotatedList
-
-    radiusAfterOffset = radius * (radiusOffset/100)
-    -- Apply transformations
-    transList =
-      map (\(n,i) -> (n, translateX (x n) (translateY (y n) i))) rotOffsetApplied
-        where
-          x n = g sin n
-          y n = g cos n
-          g f n = radiusAfterOffset*f
-            ((((-2)*(angleOffset + (fromIntegral n))) /(fromIntegral num))*pi)

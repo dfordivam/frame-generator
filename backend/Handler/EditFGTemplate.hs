@@ -33,26 +33,35 @@ getEditForeGroundR fgtID = do
   $logInfo $ "Edit foreground template"
 
   fgt <- runDB $ get fgtID
-  let fgtData = join $ decodeStrict <$>
-                foreGroundTemplateDBData <$> fgt
-      pats = (map fst) <$> fgtData
+  let
+    fgtData :: Maybe ForeGroundData
+    fgtData = join $ decodeStrict <$>
+              foreGroundTemplateDBData <$> fgt
+    layerData = ((\(ForeGroundData l _) -> l) <$> fgtData)
+    maskParam = ((\(ForeGroundData _ m) -> m) <$> fgtData)
+    pats = (map fst) <$> layerData
   dias <- liftIO $ mapM getPatternsDiaScaled pats
+  backImg <- liftIO $ getBackgroundImage
   $logInfo $ (tshow $ isJust (join dias))
   $logInfo $ (tshow $ fgtData)
-  mapM webSockets (webSocketServer fgtID <$> fgtData <*> (join dias))
+  mapM webSockets (webSocketServer fgtID <$> backImg <*> layerData <*> maskParam <*> (join dias))
   $logInfo $ "Not doing websocket"
   redirect HomeR
 
-webSocketServer fgtID fgtData' dias' = do
+webSocketServer fgtID backImg fgtData' maskParam dias' = do
   $logInfo $ "Doing edit foreground template"
 
   fgtDataRef <- liftIO $ newIORef fgtData'
+  maskParamRef <- liftIO $ newIORef maskParam
   diasRef <- liftIO $ newIORef dias'
+  maskParamRef <- liftIO $ newIORef maskParam
   imgDataRef <- liftIO $ newIORef ""
   isZoom <- liftIO $ newIORef False
+  showPreview <- liftIO $ newIORef False
 
   sourceWS $$ Data.Conduit.List.mapMaybeM
-    (handleRequest fgtDataRef diasRef imgDataRef isZoom)
+    (handleRequest fgtDataRef diasRef maskParamRef imgDataRef
+     isZoom showPreview)
     =$= sinkWSBinary
   where
     mylift :: Handler a -> ReaderT r (HandlerT App IO) a
@@ -60,27 +69,29 @@ webSocketServer fgtID fgtData' dias' = do
     handleRequest ::
          IORef (NonEmpty (PatternName, ForeGroundParams))
       -> IORef (NonEmpty (Diagram Rasterific))
+      -> IORef (MaskParams)
       -> IORef (BSL.ByteString)
+      -> IORef (Bool)
       -> IORef (Bool)
       -> BSL.ByteString
       -> ReaderT r (HandlerT App IO) (Maybe BSL.ByteString)
-    handleRequest fgtDataRef diasRef imgDataRef isZoom req' = do
+    handleRequest fgtDataRef diasRef maskParamRef imgDataRef isZoom showPreview req' = do
       $logInfo $ T.pack $ "Doing Edit" ++ show req'
       case decode req' of
         Just (Edit layerId params) -> do
           d <- liftIO $ readIORef fgtDataRef
           dias <- liftIO $ readIORef diasRef
+          m <- liftIO $ readIORef maskParamRef
           z <- liftIO $ readIORef isZoom
+          p <- liftIO $ readIORef showPreview
           -- Better method?
           let newD = Control.Lens.imap
                 (\i a@(p,_) -> if (i + 1) == layerId
                   then (p,params)
                   else a) d
 
-              resDia = fgDrawFun dias (NE.map snd newD)
-              resImg = renderFun resDia 600
-              renderFun = if z then encodeToPngWithAA else encodeToPngLazy
-              fgDrawFun = if z then getQuarterForeGround else getForeGround
+              resImg =
+                renderAndGetPngData backImg z p m newD dias
 
           liftIO $ writeIORef imgDataRef resImg
           liftIO $ writeIORef fgtDataRef newD
@@ -90,16 +101,18 @@ webSocketServer fgtID fgtData' dias' = do
         Just (AddLayer pat) -> do
           d <- liftIO $ readIORef fgtDataRef
           dias <- liftIO $ readIORef diasRef
-
+          m <- liftIO $ readIORef maskParamRef
+          z <- liftIO $ readIORef isZoom
+          p <- liftIO $ readIORef showPreview
           dia <- liftIO $ getPatternDiaScaled pat
+
           let newD = appendNE d (pat, defFGParams)
               defFGParams = def :: ForeGroundParams
 
               newDias = appendNE dias <$> dia
 
-              resDia = getForeGround <$> newDias
-                <*> pure (NE.map snd newD)
-              resImg = encodeToPngLazy <$> resDia <*> pure 600
+              resImg =
+                renderAndGetPngData backImg z p m newD <$> newDias
 
           forM resImg $ const $ do
             liftIO $ mapM (writeIORef diasRef) newDias
@@ -112,6 +125,9 @@ webSocketServer fgtID fgtData' dias' = do
         Just (DeleteLayer layerId) -> do
           d <- liftIO $ readIORef fgtDataRef
           dias <- liftIO $ readIORef diasRef
+          m <- liftIO $ readIORef maskParamRef
+          z <- liftIO $ readIORef isZoom
+          p <- liftIO $ readIORef showPreview
 
           let newD = NE.fromList $
                 (NE.take (layerId - 1) d) ++ (NE.drop layerId d)
@@ -119,8 +135,8 @@ webSocketServer fgtID fgtData' dias' = do
               newDias = NE.fromList $
                 (NE.take (layerId - 1) dias) ++ (NE.drop layerId dias)
 
-              resDia = getForeGround newDias (NE.map snd newD)
-              resImg = encodeToPngLazy resDia 600
+              resImg =
+                renderAndGetPngData backImg z p m newD newDias
 
           liftIO $ writeIORef diasRef newDias
           liftIO $ writeIORef fgtDataRef newD
@@ -140,16 +156,41 @@ webSocketServer fgtID fgtData' dias' = do
           modifyIORef isZoom not
           d <- liftIO $ readIORef fgtDataRef
           dias <- liftIO $ readIORef diasRef
+          m <- liftIO $ readIORef maskParamRef
           z <- liftIO $ readIORef isZoom
-          let
-              resDia = fgDrawFun dias (NE.map snd d)
-              resImg = renderFun resDia 600
-              renderFun = if z then encodeToPngWithAA else encodeToPngLazy
-              fgDrawFun = if z then getQuarterForeGround else getForeGround
+          p <- liftIO $ readIORef showPreview
+          let resImg = renderAndGetPngData backImg z p m d dias
+          return (Just resImg)
 
+        Just TogglePreview -> do
+          modifyIORef showPreview not
+          p <- liftIO $ readIORef showPreview
+          when p (writeIORef isZoom False)
+
+          d <- liftIO $ readIORef fgtDataRef
+          dias <- liftIO $ readIORef diasRef
+          z <- liftIO $ readIORef isZoom
+          m <- liftIO $ readIORef maskParamRef
+          let resImg = renderAndGetPngData backImg z p m d dias
           return (Just resImg)
 
         _ -> return Nothing
+
+renderAndGetPngData backImg z p maskParams d dias = encodePng $
+  if p
+    then createFrame backImg resImg maskParams 600
+    else resImg
+  where
+    resDia = fgDrawFun dias (NE.map snd d)
+    resImg = renderFun resDia 600
+    renderFun =
+      if z || p
+        then renderWithAA
+        else render
+    fgDrawFun =
+      if z && not p
+        then getQuarterForeGround
+        else getForeGround
 
 -- editMaskWebSocketWidget appSt fgd = do
 --   $logInfo $ "edit mask: Websocket version"

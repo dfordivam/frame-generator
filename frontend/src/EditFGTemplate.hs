@@ -78,14 +78,16 @@ renderEditWidget ::
   -> (FgtId, ForeGroundData)
   -> m (Event t Message.Request)
 renderEditWidget fullHost pats
-  (fgtId, (ForeGroundData fgtData)) = do
+  (fgtId, (ForeGroundData fgtData maskParam)) = do
   rec
     let
         idTxt = tshow fgtId
         ev2 = SaveFG <$ save
         editFGTEv = EditForeGroundTemplate fgtId <$
           (leftmost [reset])
-        eventMessage = (enc $ leftmost [ev1,ev2, ToggleZoom <$ zoom])
+        eventMessage = (enc $ leftmost [ev1,ev2, editMaskEv
+                                       , ToggleZoom <$ zoom
+                                       , TogglePreview <$ preview])
     ws <- webSocket ("ws://" <> fullHost <> "/edit/foreground/" <> idTxt) $
       def & webSocketConfig_send .~ eventMessage
 
@@ -141,15 +143,40 @@ renderEditWidget fullHost pats
       let dynAttr = ffor urlDyn (\u -> ("src" =: u))
       divClass "center-block" $ elDynAttr "img" dynAttr $ return ()
 
+    (mp,editMaskEv) <- maskParamControls maskParam
+
     reset <- button "Reset All"
     -- Race in save signal, both WS fire
     save <- button "Save"
     saveAsFG <- button "Save as ForeGround"
     zoom <- button "Zoom"
+    preview <- button "preview"
 
-    let saveFGEv = SaveForeGround <$> ForeGroundData <$> (tagDyn fgtDataDyn saveAsFG)
+    let saveFGEv = SaveForeGround <$> (tagPromptlyDyn fgtD saveAsFG)
+        fgtD = ForeGroundData <$> fgtDataDyn <*> mp
 
   return $ leftmost [editFGTEv, saveFGEv]
+
+maskParamControls (MaskParams d b) = do
+  dilate <- rangeInput $
+    RangeInputConfig
+      (fromIntegral d)
+      never
+      (constDyn $ ("min" =: "0") <> ("max" =: "20") <> ("step" =: "1"))
+
+  blur <- rangeInput $
+    RangeInputConfig
+      (fromIntegral b)
+      never
+      (constDyn $ ("min" =: "0") <> ("max" =: "20") <> ("step" =: "1"))
+
+  let mp = MaskParams <$> (floor <$> _rangeInput_value dilate)
+             <*> (floor <$> _rangeInput_value blur)
+      editEv = leftmost [_rangeInput_input dilate
+                        , _rangeInput_input blur]
+
+  return $ (,) mp $
+    EditMask <$> (tagPromptlyDyn mp editEv)
 
 miniPatternBrowser ::
   (MonadWidget t m)
