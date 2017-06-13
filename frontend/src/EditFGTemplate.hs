@@ -116,7 +116,7 @@ renderEditWidget fullHost pats
               handler _ _ = Nothing
 
               lc d = do
-                e <- dyn (layerControls save <$> d)
+                e <- dyn (layerControls fullHost save <$> d)
                 switchPromptly never e
 
               (fgtDataDyn, fgtDataDynLight) = splitDynPure fgtDataDynTuple
@@ -212,15 +212,20 @@ miniPatternBrowser fullHost pats = do
 
 layerControls ::
   (MonadWidget t m)
-  => Event t ()
+  => Text
+  -> Event t ()
   -> (LayerId, (PatternName, ForeGroundParams))
   -> m (Event t EditFGTemplate)
-layerControls save (layerId, (_, fgParam)) = do
+layerControls fullHost save (layerId, ((grp,file), fgParam)) = do
   el "td" $ do
     el "table" $ do
       rec
         let
           updateResetEv = save
+
+          getImgUrl = "http://" <> fullHost
+            <> patternsDir <> grp <> "/" <> file
+        img getImgUrl
 
         s <- rangeInputWidgetWithTextEditAndReset
           "Scale:" (scaling fgParam)
