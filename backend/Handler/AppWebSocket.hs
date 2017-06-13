@@ -79,6 +79,7 @@ appWebSocketServer appSt = do
           let msg = ForeGroundTemplateDataT
                 <$> ForeGroundTemplateDataRes fgtId
                       <$> d
+              d :: Maybe ForeGroundData
               d = join $ decodeStrict <$>
                 foreGroundTemplateDBData <$> fgt
           return $ msg

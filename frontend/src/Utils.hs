@@ -132,7 +132,8 @@ rangeInputWithDecAndInc
         (constDyn $ ("min" =: tshow min) <> ("max" =: tshow max)
           <> ("step" =: tshow step))
   return ri
-idTag t = elAttr "div" (("id" =: t) <> ("style" =: "padding-top: 70px"))
+
+idTag t = elAttr "div" (("id" =: t) <> ("style" =: ""))
 
 data PaginationEvents =
   Prev | Next | Page Int

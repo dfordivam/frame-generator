@@ -59,17 +59,29 @@ mainWidgetTop = do
     patListDyn <- holdDyn [] patternList
     fgtListDyn <- holdDyn [] fgtList
 
-    navReq <- navbar
+    (navReq, tabEv) <- navbar
+    tabDyn <- holdDyn Patterns (leftmost [tabEv, EditWidget <$ fgtDataEv])
+    let patternTab = tabDisplayAttr Patterns
+        templatesTab = tabDisplayAttr Templates
+        editWidgetTab = tabDisplayAttr EditWidget
+        foregroundsTab = tabDisplayAttr ForeGrounds
+        previewWidgetTab = tabDisplayAttr PreviewWidget
 
-    req1 <- patternBrowseWidget fullHost patListDyn
+        fgtDataEv = (\(Message.ForeGroundTemplateDataRes _ _) -> ())
+          <$> (getResponse ws)
 
-    req4 <- foreGroundTemplateBrowseWidget fullHost fgtList
+        tabDisplayAttr t = f <$> tabDyn
+          where f tSel = if t == tSel then Map.empty else ("style" =: "display: none")
 
-    req2 <- editFGTemplateWidget fullHost patListDyn
+    req1 <- elDynAttr "div" patternTab $ patternBrowseWidget fullHost patListDyn
+
+    req4 <- elDynAttr "div" templatesTab $ foreGroundTemplateBrowseWidget fullHost fgtList
+
+    req2 <- elDynAttr "div" editWidgetTab $ editFGTemplateWidget fullHost patListDyn
       (getResponse ws) (getResponse ws)
 
-    req6 <- foreGroundBrowseWidget fullHost (getResponse ws) (getResponse ws)
-    req7 <- previewWidget fullHost patternList fgtListDyn (getResponse ws)
+    req6 <- elDynAttr "div" foregroundsTab $ foreGroundBrowseWidget fullHost (getResponse ws) (getResponse ws)
+    req7 <- elDynAttr "div" previewWidgetTab $ previewWidget fullHost patternList fgtListDyn (getResponse ws)
 
     ws <- webSocket url $ def &
       webSocketConfig_send .~ wsSend
@@ -79,29 +91,40 @@ mainWidgetTop = do
     putDebugLnE (fgtList) show
   return ()
 
+data Tabs = Patterns | Templates | EditWidget | ForeGrounds | PreviewWidget
+  deriving (Eq)
+
 navbar :: (MonadWidget t m)
-  => m (Event t Message.Request)
+  => m (Event t Message.Request
+       , Event t Tabs)
 navbar = do
-  elClass "nav" "navbar navbar-default navbar-fixed-top" $
+  elClass "nav" "navbar navbar-default" $
     divClass "container" $ do
       divClass "navbar-header" $ do
         elAttr "a" (("class" =: "navbar-brand") <> ("href" =: "#")) $
           text "Frame Generator"
       divClass "navbar-collapse collapse" $
         elClass "ul" "nav navbar-nav" $ do
-          elClass "li" "" $ elAttr "a" ("href" =: "#pattern_browser") $ text "Patterns"
+          e0 <- elClass "li" "" $ do
+            (e,_) <- elAttr' "a" ("href" =: "#pattern_browser") $ text "Patterns"
+            return (domEvent Click e)
           e1 <- elClass "li" "" $ do
             (e,_) <- elAttr' "a" ("href" =: "#template_browser") $ text "Templates"
             return (Message.GetForeGroundTemplateList <$ (domEvent Click e))
+          e4 <- elClass "li" "" $ do
+            (e,_) <- elAttr' "a" Map.empty $ text "Edit Widget"
+            return (domEvent Click e)
           e2 <- elClass "li" "" $ do
             (e,_) <- elAttr' "a" ("href" =: "#foreground_browser") $ text "ForeGrounds"
             return (Message.GetForeGroundList <$ (domEvent Click e))
           e3 <- elClass "li" "" $ do
             (e,_) <- elAttr' "a" ("href" =: "#preview_widget") $ text "Preview Widget"
-            return never
+            return (domEvent Click e)
           elClass "li" "" $
             elAttr "a" ("href" =: "/uploadpatterns") $ text "Upload Patterns"
-          return $ leftmost [e1,e2,e3]
+          let tabEv = leftmost [Patterns <$ e0, Templates <$ e1, EditWidget <$ e4
+                               , ForeGrounds <$ e2, PreviewWidget <$ e3]
+          return $ (leftmost [e1,e2], tabEv)
 
 
 getResponse ws =

@@ -145,9 +145,11 @@ webSocketServer fgtID backImg fgtData' maskParam dias' = do
 
         Just SaveFG -> do
           d <- liftIO $ readIORef fgtDataRef
+          m <- liftIO $ readIORef maskParamRef
           imgData <- liftIO $ readIORef imgDataRef
+          let fgtD = ForeGroundData d m
           mylift $ runDB $ update fgtID
-            [ForeGroundTemplateDBData =. (BSL.toStrict $ encode d)]
+            [ForeGroundTemplateDBData =. (BSL.toStrict $ encode fgtD)]
           liftIO $ savePng (Just (fgtemplatesDir, tshow (fromSqlKey fgtID))) $
             BSL.toStrict imgData
           return Nothing
