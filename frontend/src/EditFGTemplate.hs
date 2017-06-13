@@ -158,25 +158,28 @@ renderEditWidget fullHost pats
   return $ leftmost [editFGTEv, saveFGEv]
 
 maskParamControls (MaskParams d b) = do
-  dilate <- rangeInput $
-    RangeInputConfig
-      (fromIntegral d)
-      never
-      (constDyn $ ("min" =: "0") <> ("max" =: "20") <> ("step" =: "1"))
+  el "table" $ el "tr" $ do
+    el "td" $ text "Dilate"
+    dilate <- el "td" $ rangeInput $
+      RangeInputConfig
+        (fromIntegral d)
+        never
+        (constDyn $ ("min" =: "0") <> ("max" =: "20") <> ("step" =: "1"))
 
-  blur <- rangeInput $
-    RangeInputConfig
-      (fromIntegral b)
-      never
-      (constDyn $ ("min" =: "0") <> ("max" =: "20") <> ("step" =: "1"))
+    el "td" $ text "Blur"
+    blur <- el "td" $ rangeInput $
+      RangeInputConfig
+        (fromIntegral b)
+        never
+        (constDyn $ ("min" =: "0") <> ("max" =: "20") <> ("step" =: "1"))
 
-  let mp = MaskParams <$> (floor <$> _rangeInput_value dilate)
-             <*> (floor <$> _rangeInput_value blur)
-      editEv = leftmost [_rangeInput_input dilate
-                        , _rangeInput_input blur]
+    let mp = MaskParams <$> (floor <$> _rangeInput_value dilate)
+               <*> (floor <$> _rangeInput_value blur)
+        editEv = leftmost [_rangeInput_input dilate
+                          , _rangeInput_input blur]
 
-  return $ (,) mp $
-    EditMask <$> (tagPromptlyDyn mp editEv)
+    return $ (,) mp $
+      EditMask <$> (tagPromptlyDyn mp editEv)
 
 miniPatternBrowser ::
   (MonadWidget t m)

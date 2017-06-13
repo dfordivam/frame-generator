@@ -174,6 +174,16 @@ webSocketServer fgtID backImg fgtData' maskParam dias' = do
           let resImg = renderAndGetPngData backImg z p m d dias
           return (Just resImg)
 
+        Just (EditMask maskParams) -> do
+          writeIORef maskParamRef maskParams
+          p <- liftIO $ readIORef showPreview
+          d <- liftIO $ readIORef fgtDataRef
+          dias <- liftIO $ readIORef diasRef
+          z <- liftIO $ readIORef isZoom
+          m <- liftIO $ readIORef maskParamRef
+          let resImg = renderAndGetPngData backImg z p m d dias
+          return (Just resImg)
+
         _ -> return Nothing
 
 renderAndGetPngData backImg z p maskParams d dias = encodePng $

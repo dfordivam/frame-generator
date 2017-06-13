@@ -93,7 +93,7 @@ rangeInputWidgetWithTextEditAndReset
         evValChange <- el "td" $
           editInPlace (constant True) val
         resetEv <- el "td" $
-          button "Reset"
+          button "R"
         decreaseEv <- el "td" $ button "<"
         increaseEv <- el "td" $ button ">"
         return (evValChange, resetEv, decreaseEv, increaseEv)

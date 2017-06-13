@@ -51,7 +51,7 @@ getPatternsDia pats = do
     then return $ Just p
     else return Nothing
 
-scaledImgWidth = 50
+scaledImgWidth = 200
 
 getPatternDiaScaled ::
   PatternName

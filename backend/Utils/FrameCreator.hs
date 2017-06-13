@@ -218,11 +218,15 @@ createFrame backImg fgJP maskParams width = maskedImgJpData
         imgJP fgJP maskJP
 
     doMasking i f m =
-      if m > 0
-        -- Blur orig Image at the border
-        then ceiling $
+      if f > 0
+        then f
+        else ceiling $
           ((fromIntegral i)* (fromIntegral m))/255
-        else f
+      -- if m > 0
+      --   -- Blur orig Image at the border
+      --   then max f $ ceiling $
+      --     ((fromIntegral i)* (fromIntegral m))/255
+      --   else f
 
 -- Render Utilities
 --------------------------------------------------------------------------------------
