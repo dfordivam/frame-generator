@@ -41,7 +41,7 @@ patternBrowseWidget fullHost patListDyn = do
     f (groupName, files) = do
       divClass "row panel panel-primary" $ do
         divClass "panel-heading" $ text groupName
-        doPagination 12 (constDyn files) (\files -> do
+        doPagination 24 (constDyn files) (\files -> do
           eVs <- divClass "row" $ forM files
             (\file ->
                divClass "col-md-1" $ do
