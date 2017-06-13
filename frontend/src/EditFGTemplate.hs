@@ -58,7 +58,11 @@ editFGTemplateWidget fullHost patListDyn newFGTemplEv fgtDataEv' = do
           renderEditWidget fullHost patListDyn d
 
   evDyn <- idTag "edit-fgt-widget" $
-    widgetHold (do {return never;}) (f <$> fgtDataEv)
+    widgetHold
+      (do
+          text "Please select a pattern from Patterns to start editing..."
+          return never)
+      (f <$> fgtDataEv)
 
   let evClick = switchPromptlyDyn evDyn
 
